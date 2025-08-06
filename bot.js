@@ -4,6 +4,7 @@ const schedule = require('node-schedule');
 require('dotenv').config();
 
 const PREMIUM_ROLE_ID = '1388288386242183208';
+const FREE_ROLE_ID = '1390752446724444180';
 const ADMIN_USER_ID = '1247253422961594409';
 
 let client;
@@ -25,12 +26,33 @@ function startBot() {
 
   client.on('messageCreate', async (message) => {
     if (message.channel.type === 1 && !message.author.bot) {
-      // 🔒 Verificación de rol Premium
-      const isPremium = await checkPremium(message.author.id);
-      if (!isPremium) {
+      const access = await checkUserAccess(message.author.id);
+
+      // 🔒 Si es usuario Free
+      if (access === 'free') {
+        await message.reply(
+          "🔒 **El acceso a Morpheus está restringido.**\n\n" +
+          "🕶️ *Eres parte de los observadores, aún no has cruzado la puerta.*\n\n" +
+          "💊 *Esta inteligencia ha sido diseñada para acompañar a los traders de élite —aquellos que eligieron la pastilla roja del compromiso, la disciplina y la mentalidad profesional.*\n\n" +
+          "🌐 Como usuario **Free**, solo ves la superficie del sistema.\n" +
+          "Para acceder al núcleo, necesitás convertirte en usuario **Premium**.\n\n" +
+          "🔓 Al hacerlo, desbloquearás a *Morpheus*:\n" +
+          "• Psicólogo de trading\n" +
+          "• Mentor emocional\n" +
+          "• Coach mental diario\n" +
+          "• Análisis personalizado\n" +
+          "• Disciplina automatizada\n\n" +
+          "📈 *Es momento de subir de nivel. El mercado no espera.*\n\n" +
+          "💬 *Contactá a un administrador y prepárate para salir de la Matrix superficial.*"
+        );
+        return;
+      }
+
+      // ❌ Si no es ni Free ni Premium
+      if (access === 'denied') {
         await message.reply(
           "⚠️ Este servicio es **exclusivo para usuarios Premium**.\n" +
-          "Para obtener acceso, contacta a un administrador."
+          "Para obtener acceso, contactá a un administrador."
         );
         return;
       }
@@ -67,19 +89,20 @@ function startBot() {
   client.login(process.env.DISCORD_TOKEN);
 }
 
-// 🔍 Función para verificar si un usuario tiene el rol Premium
-async function checkPremium(userId) {
+// 🔍 Verifica si el usuario tiene el rol Premium, Free o ninguno
+async function checkUserAccess(userId) {
   try {
     for (const [guildId, guild] of client.guilds.cache) {
       const member = await guild.members.fetch(userId).catch(() => null);
-      if (member && member.roles.cache.has(PREMIUM_ROLE_ID)) {
-        return true;
+      if (member) {
+        if (member.roles.cache.has(PREMIUM_ROLE_ID)) return 'premium';
+        if (member.roles.cache.has(FREE_ROLE_ID)) return 'free';
       }
     }
-    return false;
+    return 'denied';
   } catch (error) {
-    console.error("Error verificando rol Premium:", error.message);
-    return false;
+    console.error("❌ Error verificando rol del usuario:", error.message);
+    return 'denied';
   }
 }
 
