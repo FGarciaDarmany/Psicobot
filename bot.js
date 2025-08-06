@@ -1,3 +1,4 @@
+const express = require('express');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { obtenerRespuestaPsicologica } = require('./funciones/psicologo');
 const schedule = require('node-schedule');
@@ -6,6 +7,18 @@ require('dotenv').config();
 const PREMIUM_ROLE_ID = '1388288386242183208';
 const FREE_ROLE_ID = '1390752446724444180';
 const ADMIN_USER_ID = '1247253422961594409';
+
+// === Servidor Express para mantener el bot vivo en Render ===
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("Morpheus está en línea 🧠");
+});
+
+app.listen(PORT, () => {
+  console.log(`🌐 Servidor Express corriendo en el puerto ${PORT}`);
+});
 
 let client;
 
@@ -28,7 +41,6 @@ function startBot() {
     if (message.channel.type === 1 && !message.author.bot) {
       const access = await checkUserAccess(message.author.id);
 
-      // 🔒 Si es usuario Free
       if (access === 'free') {
         await message.reply(
           "🔒 **El acceso a Morpheus está restringido.**\n\n" +
@@ -48,7 +60,6 @@ function startBot() {
         return;
       }
 
-      // ❌ Si no es ni Free ni Premium
       if (access === 'denied') {
         await message.reply(
           "⚠️ Este servicio es **exclusivo para usuarios Premium**.\n" +
@@ -59,7 +70,6 @@ function startBot() {
 
       const contenido = message.content.toLowerCase();
 
-      // 🟢 COMANDO ESPECIAL: "comencemos el día"
       if (contenido.includes("comencemos el día")) {
         await message.reply(
           "💊 **BIENVENIDO DE NUEVO, OPERADOR.**\n\n" +
@@ -75,7 +85,6 @@ function startBot() {
         return;
       }
 
-      // 🧠 RESPUESTA PSICOLÓGICA NORMAL
       try {
         const respuesta = await obtenerRespuestaPsicologica(contenido);
         await message.reply(respuesta);
@@ -89,7 +98,6 @@ function startBot() {
   client.login(process.env.DISCORD_TOKEN);
 }
 
-// 🔍 Verifica si el usuario tiene el rol Premium, Free o ninguno
 async function checkUserAccess(userId) {
   try {
     for (const [guildId, guild] of client.guilds.cache) {
@@ -114,26 +122,22 @@ function stopBot() {
   }
 }
 
-// 🕓 Encender todos los días a las 05:00 (hora del servidor)
 schedule.scheduleJob('0 5 * * *', () => {
   console.log("⏰ Iniciando Morpheus");
   startBot();
 });
 
-// 🕛 Apagar a las 23:59
 schedule.scheduleJob('59 23 * * *', () => {
   console.log("⏰ Apagando Morpheus");
   stopBot();
 });
 
-// 🟢 Keep Alive: mantener vivo el bot mientras está encendido
 setInterval(() => {
   if (client && client.ws.status === 0) {
     console.log("💓 Morpheus sigue activo...");
   }
-}, 1000 * 60 * 14); // Cada 14 minutos
+}, 1000 * 60 * 14);
 
-// ⏰ Rutina diaria: check-in emocional a las 12:30
 schedule.scheduleJob('30 12 * * *', async () => {
   if (client) {
     const usuario = await client.users.fetch(ADMIN_USER_ID);
