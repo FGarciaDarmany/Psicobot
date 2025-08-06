@@ -122,6 +122,7 @@ function stopBot() {
   }
 }
 
+// === SCHEDULE ===
 schedule.scheduleJob('0 5 * * *', () => {
   console.log("⏰ Iniciando Morpheus");
   startBot();
@@ -158,3 +159,6 @@ schedule.scheduleJob('30 12 * * *', async () => {
     }
   }
 });
+
+// === ESTA LÍNEA INICIALIZA EL BOT INMEDIATAMENTE EN RENDER ===
+startBot(); // 👈 Esto es lo que hacía falta para que el bot aparezca online
