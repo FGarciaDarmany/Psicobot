@@ -3,12 +3,16 @@ const { obtenerRespuestaPsicologica } = require('./funciones/psicologo');
 const schedule = require('node-schedule');
 require('dotenv').config();
 
+const PREMIUM_ROLE_ID = '1388288386242183208';
+const ADMIN_USER_ID = '1247253422961594409';
+
 let client;
 
 function startBot() {
   client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.MessageContent
     ],
@@ -21,6 +25,16 @@ function startBot() {
 
   client.on('messageCreate', async (message) => {
     if (message.channel.type === 1 && !message.author.bot) {
+      // 🔒 Verificación de rol Premium
+      const isPremium = await checkPremium(message.author.id);
+      if (!isPremium) {
+        await message.reply(
+          "⚠️ Este servicio es **exclusivo para usuarios Premium**.\n" +
+          "Para obtener acceso, contacta a un administrador."
+        );
+        return;
+      }
+
       const contenido = message.content.toLowerCase();
 
       // 🟢 COMANDO ESPECIAL: "comencemos el día"
@@ -53,6 +67,22 @@ function startBot() {
   client.login(process.env.DISCORD_TOKEN);
 }
 
+// 🔍 Función para verificar si un usuario tiene el rol Premium
+async function checkPremium(userId) {
+  try {
+    for (const [guildId, guild] of client.guilds.cache) {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (member && member.roles.cache.has(PREMIUM_ROLE_ID)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error("Error verificando rol Premium:", error.message);
+    return false;
+  }
+}
+
 function stopBot() {
   if (client) {
     console.log("🛑 Morpheus desconectado (23:59)");
@@ -79,3 +109,25 @@ setInterval(() => {
     console.log("💓 Morpheus sigue activo...");
   }
 }, 1000 * 60 * 14); // Cada 14 minutos
+
+// ⏰ Rutina diaria: check-in emocional a las 12:30
+schedule.scheduleJob('30 12 * * *', async () => {
+  if (client) {
+    const usuario = await client.users.fetch(ADMIN_USER_ID);
+    if (usuario) {
+      try {
+        await usuario.send(
+          "☀️ **Check-in emocional 🧠**\n\n" +
+          "Ya es mediodía. ¿Cómo va tu operativa hasta ahora?\n\n" +
+          "🔹 ¿Operaste según tu plan?\n" +
+          "🔹 ¿Te sentís emocionalmente en control?\n" +
+          "🔹 ¿Necesitás pausar y respirar?\n\n" +
+          "💬 *Respondeme si querés que hablemos un rato. Estoy para ayudarte.*"
+        );
+        console.log("📩 Check-in enviado a Fernando a las 12:30");
+      } catch (error) {
+        console.error("❌ No se pudo enviar el DM del check-in:", error.message);
+      }
+    }
+  }
+});
