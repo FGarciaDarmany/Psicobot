@@ -21,8 +21,27 @@ function startBot() {
 
   client.on('messageCreate', async (message) => {
     if (message.channel.type === 1 && !message.author.bot) {
+      const contenido = message.content.toLowerCase();
+
+      // 🟢 COMANDO ESPECIAL: "comencemos el día"
+      if (contenido.includes("comencemos el día")) {
+        await message.reply(
+          "💊 **BIENVENIDO DE NUEVO, OPERADOR.**\n\n" +
+          "🧠 ACTIVANDO PROTOCOLO DE MENTALIDAD PARA EL TRADER DE ALTO RENDIMIENTO...\n\n" +
+          "🔹 *Enfoque:* SOLO operar setups claros.\n" +
+          "🔹 *Meta de hoy:* Mantener la disciplina.\n" +
+          "🔹 *Emoción dominante:* 🧘 Calma anticipada.\n" +
+          "🔹 *Recordatorio:* El mercado no se controla, se interpreta.\n\n" +
+          "🚨 *Hoy operás desde las 05:00 hasta las 23:59.*\n" +
+          "💬 *Te hablaré al mediodía para hacer check-in.*\n\n" +
+          "☕ ¿Listo para ejecutar como un profesional?"
+        );
+        return;
+      }
+
+      // 🧠 RESPUESTA PSICOLÓGICA NORMAL
       try {
-        const respuesta = await obtenerRespuestaPsicologica(message.content);
+        const respuesta = await obtenerRespuestaPsicologica(contenido);
         await message.reply(respuesta);
       } catch (error) {
         console.error('❌ Error al generar respuesta:', error.message);
@@ -42,7 +61,7 @@ function stopBot() {
   }
 }
 
-// 🕓 Encender todos los días a las 05:00 (hora del servidor, debe estar en UTC o configurado)
+// 🕓 Encender todos los días a las 05:00 (hora del servidor)
 schedule.scheduleJob('0 5 * * *', () => {
   console.log("⏰ Iniciando Morpheus");
   startBot();
@@ -59,5 +78,4 @@ setInterval(() => {
   if (client && client.ws.status === 0) {
     console.log("💓 Morpheus sigue activo...");
   }
-}, 1000 * 60 * 14); // Cada 14 minutos (Render desconecta a los 15)
-
+}, 1000 * 60 * 14); // Cada 14 minutos
