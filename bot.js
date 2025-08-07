@@ -53,19 +53,18 @@ function startBot() {
 
   client.once('ready', () => {
     console.log(`🧠 Morpheus activo como ${client.user.tag}`);
+    programarRecordatorios(); // ← ¡AQUÍ SE LLAMA LA FUNCIÓN!
   });
 
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // === Comando !noticias manual ===
     if (message.content === '!noticias') {
       const noticias = await obtenerNoticias();
       await message.channel.send(noticias);
       return;
     }
 
-    // === Si es un DM ===
     if (message.channel.type === 1) {
       const access = await checkUserAccess(message.author.id);
       if (access === 'free') {
@@ -138,13 +137,9 @@ schedule.scheduleJob('30 12 * * *', async () => {
 });
 
 // === ENVÍO AUTOMÁTICO DE NOTICIAS ===
-
-// Domingos 18:30 - Semana
 schedule.scheduleJob('30 18 * * 0', async () => {
   await enviarNoticias("semanales");
 });
-
-// Lunes a Viernes 05:00 y 08:30 - Día
 schedule.scheduleJob('0 5 * * 1-5', async () => {
   await enviarNoticias("diarias");
 });
@@ -174,11 +169,66 @@ async function enviarNoticias(tipo) {
   }
 }
 
+// ✅ REINICIO AUTOMÁTICO A LAS 04:50
+schedule.scheduleJob('50 4 * * *', () => {
+  console.log("🔄 Reinicio programado: apagando Morpheus para reprogramar noticias.");
+  process.exit();
+});
+
 // === AUTOPING KEEP ALIVE ===
 setInterval(() => {
   require('https').get('https://psicobot.onrender.com');
   console.log("🔁 Autoping enviado.");
-}, 240000); // Cada 4 minutos
+}, 240000);
 
 // === INICIAR BOT ===
 startBot();
+
+// === PROGRAMADOR DE RECORDATORIOS ===
+async function programarRecordatorios() {
+  try {
+    const noticias = await obtenerNoticias();
+    const lineas = noticias.split('\n');
+
+    for (const linea of lineas) {
+      const regex = /• (.*?) - \*\*(.*?)\*\* \((\d{1,2}:\d{2})\)/;
+      const match = linea.match(regex);
+      if (!match) continue;
+
+      const [, flag, evento, horaTexto] = match;
+
+      const [hh, mm] = horaTexto.split(":").map(n => parseInt(n));
+      const fecha = new Date();
+      fecha.setHours(hh);
+      fecha.setMinutes(mm - 10);
+      fecha.setSeconds(0);
+
+      if (fecha < new Date()) continue;
+
+      schedule.scheduleJob(fecha, async () => {
+        const mensaje = `🚨 **Recordatorio: Noticia de Alto Impacto**\n${flag} - **${evento}** en 10 minutos.`;
+
+        try {
+          const canal = await client.channels.fetch(CANAL_ALERTAS_ID);
+          if (canal) await canal.send(mensaje);
+        } catch (e) {
+          console.error("❌ Error al enviar al canal de alertas:", e.message);
+        }
+
+        const usuarios = fs.readFileSync('PREMIUM.txt', 'utf-8').split('\n').filter(Boolean);
+        for (const id of usuarios) {
+          try {
+            const user = await client.users.fetch(id.trim());
+            await user.send(mensaje);
+          } catch (e) {
+            console.error(`❌ No se pudo enviar recordatorio a ${id}:`, e.message);
+          }
+        }
+
+        console.log(`⏰ Recordatorio enviado: ${evento} (${horaTexto})`);
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error al programar recordatorios:", error.message);
+  }
+}
