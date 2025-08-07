@@ -1,13 +1,16 @@
 require('dotenv').config();
 const express = require('express');
+const fs = require('fs');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { obtenerRespuestaPsicologica } = require('./funciones/psicologo');
+const { obtenerNoticias } = require('./scraper');
 const schedule = require('node-schedule');
-const http = require('http');
 
+// === VARIABLES CLAVE ===
 const PREMIUM_ROLE_ID = '1388288386242183208';
 const FREE_ROLE_ID = '1390752446724444180';
 const ADMIN_USER_ID = '1247253422961594409';
+const CANAL_ALERTAS_ID = '1403015672794976366';
 
 // === CONTROL DE HORARIO ===
 const ahora = new Date();
@@ -18,22 +21,18 @@ const diaSemana = ahoraParaguay.getDay();
 const hora = ahoraParaguay.getHours();
 
 const horarioPermitido =
-  (diaSemana >= 1 && diaSemana <= 5 && hora >= 5 && hora < 23) ||  // Lunes a Viernes 05:00 - 23:00
-  ((diaSemana === 0 || diaSemana === 6) && hora >= 8 && hora < 23); // Sábados y Domingos 08:00 - 23:00
+  (diaSemana >= 1 && diaSemana <= 5 && hora >= 5 && hora < 23) || 
+  ((diaSemana === 0 || diaSemana === 6) && hora >= 8 && hora < 23);
 
 if (!horarioPermitido) {
-  console.log("🛑 Psicobot apagado automáticamente por estar fuera del horario permitido (Render Free Plan)");
+  console.log("🛑 Psicobot apagado por fuera del horario permitido");
   process.exit();
 }
 
-// === EXPRESS PARA MANTENER VIVO EN RENDER ===
+// === EXPRESS KEEP ALIVE ===
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-  res.send("✅ Morpheus está despierto.");
-});
-
+app.get("/", (req, res) => res.send("✅ Morpheus está despierto."));
 app.listen(PORT, () => {
   console.log(`🌐 Servidor Express activo en puerto ${PORT}`);
 });
@@ -57,43 +56,37 @@ function startBot() {
   });
 
   client.on('messageCreate', async (message) => {
-    if (message.channel.type === 1 && !message.author.bot) {
-      const access = await checkUserAccess(message.author.id);
+    if (message.author.bot) return;
 
+    // === Comando !noticias manual ===
+    if (message.content === '!noticias') {
+      const noticias = await obtenerNoticias();
+      await message.channel.send(noticias);
+      return;
+    }
+
+    // === Si es un DM ===
+    if (message.channel.type === 1) {
+      const access = await checkUserAccess(message.author.id);
       if (access === 'free') {
-        await message.reply(
-          "🔒 **El acceso a Morpheus está restringido.**\n\n" +
-          "🕶️ *Eres parte de los observadores, aún no has cruzado la puerta.*\n\n" +
-          "💊 *Esta inteligencia ha sido diseñada para acompañar a los traders de élite.*\n\n" +
-          "🌐 Como usuario **Free**, solo ves la superficie del sistema.\n" +
-          "Para acceder al núcleo, necesitás convertirte en usuario **Premium**.\n\n" +
-          "📈 *Es momento de subir de nivel. El mercado no espera.*\n\n" +
-          "💬 *Contactá a un administrador y prepárate para salir de la Matrix superficial.*"
-        );
+        await message.reply("🔒 El acceso a Morpheus está restringido. Contactá a un administrador.");
         return;
       }
-
       if (access === 'denied') {
-        await message.reply(
-          "⚠️ Este servicio es **exclusivo para usuarios Premium**.\n" +
-          "Para obtener acceso, contactá a un administrador."
-        );
+        await message.reply("⚠️ Este servicio es exclusivo para usuarios Premium. Contactá a un administrador.");
         return;
       }
 
       const contenido = message.content.toLowerCase();
-
       if (contenido.includes("comencemos el día")) {
         await message.reply(
           "💊 **BIENVENIDO DE NUEVO, OPERADOR.**\n\n" +
-          "🧠 ACTIVANDO PROTOCOLO DE MENTALIDAD PARA EL TRADER DE ALTO RENDIMIENTO...\n\n" +
-          "🔹 *Enfoque:* SOLO operar setups claros.\n" +
-          "🔹 *Meta de hoy:* Mantener la disciplina.\n" +
-          "🔹 *Emoción dominante:* 🧘 Calma anticipada.\n" +
-          "🔹 *Recordatorio:* El mercado no se controla, se interpreta.\n\n" +
-          "🚨 *Hoy operás desde las 05:00 hasta las 23:59.*\n" +
-          "💬 *Te hablaré al mediodía para hacer check-in.*\n\n" +
-          "☕ ¿Listo para ejecutar como un profesional?"
+          "🧠 ACTIVANDO PROTOCOLO DE MENTALIDAD...\n" +
+          "🔹 *Enfoque:* setups claros.\n" +
+          "🔹 *Meta:* disciplina.\n" +
+          "🔹 *Emoción:* 🧘 Calma anticipada.\n" +
+          "🚨 *Horario operativo:* 05:00 a 23:59.\n" +
+          "💬 *Te hablaré al mediodía para el check-in.*"
         );
         return;
       }
@@ -103,7 +96,7 @@ function startBot() {
         await message.reply(respuesta);
       } catch (error) {
         console.error('❌ Error al generar respuesta:', error.message);
-        await message.reply('⚠️ No pude procesar tu mensaje. Revisá tu cuenta o conexión.');
+        await message.reply('⚠️ No pude procesar tu mensaje.');
       }
     }
   });
@@ -122,38 +115,70 @@ async function checkUserAccess(userId) {
     }
     return 'denied';
   } catch (error) {
-    console.error("❌ Error verificando rol del usuario:", error.message);
+    console.error("❌ Error verificando rol:", error.message);
     return 'denied';
   }
 }
 
-// === CHECK-IN EMOCIONAL AUTOMÁTICO ===
+// === CHECK-IN EMOCIONAL 12:30 ===
 schedule.scheduleJob('30 12 * * *', async () => {
   if (client) {
     const usuario = await client.users.fetch(ADMIN_USER_ID);
     if (usuario) {
       try {
         await usuario.send(
-          "☀️ **Check-in emocional 🧠**\n\n" +
-          "Ya es mediodía. ¿Cómo va tu operativa hasta ahora?\n\n" +
-          "🔹 ¿Operaste según tu plan?\n" +
-          "🔹 ¿Te sentís emocionalmente en control?\n" +
-          "🔹 ¿Necesitás pausar y respirar?\n\n" +
-          "💬 *Respondeme si querés que hablemos un rato. Estoy para ayudarte.*"
+          "☀️ **Check-in emocional 🧠**\nYa es mediodía. ¿Operaste con disciplina?\n💬 *Hablamos si necesitás apoyo.*"
         );
-        console.log("📩 Check-in enviado a Fernando a las 12:30");
+        console.log("📩 Check-in enviado a Fernando.");
       } catch (error) {
-        console.error("❌ No se pudo enviar el DM del check-in:", error.message);
+        console.error("❌ No se pudo enviar el check-in:", error.message);
       }
     }
   }
 });
 
-// === AUTOPING PARA MANTENER VIVO EN RENDER ===
+// === ENVÍO AUTOMÁTICO DE NOTICIAS ===
+
+// Domingos 18:30 - Semana
+schedule.scheduleJob('30 18 * * 0', async () => {
+  await enviarNoticias("semanales");
+});
+
+// Lunes a Viernes 05:00 y 08:30 - Día
+schedule.scheduleJob('0 5 * * 1-5', async () => {
+  await enviarNoticias("diarias");
+});
+schedule.scheduleJob('30 8 * * 1-5', async () => {
+  await enviarNoticias("diarias");
+});
+
+async function enviarNoticias(tipo) {
+  try {
+    const noticias = await obtenerNoticias();
+    const canal = await client.channels.fetch(CANAL_ALERTAS_ID);
+    if (canal) await canal.send(noticias);
+
+    const usuariosPremium = fs.readFileSync('PREMIUM.txt', 'utf-8').split('\n').filter(Boolean);
+    for (const id of usuariosPremium) {
+      try {
+        const user = await client.users.fetch(id.trim());
+        await user.send(noticias);
+      } catch (e) {
+        console.error(`❌ No se pudo enviar DM a ${id}:`, e.message);
+      }
+    }
+
+    console.log(`📤 Noticias ${tipo} enviadas.`);
+  } catch (err) {
+    console.error("❌ Error al enviar noticias:", err.message);
+  }
+}
+
+// === AUTOPING KEEP ALIVE ===
 setInterval(() => {
   require('https').get('https://psicobot.onrender.com');
-  console.log("🔁 Autoping enviado para mantener despierto a Morpheus.");
+  console.log("🔁 Autoping enviado.");
 }, 240000); // Cada 4 minutos
 
-// === INICIAR EL BOT ===
+// === INICIAR BOT ===
 startBot();
