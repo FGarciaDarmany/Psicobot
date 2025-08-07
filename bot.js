@@ -1,25 +1,44 @@
+require('dotenv').config();
 const express = require('express');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { obtenerRespuestaPsicologica } = require('./funciones/psicologo');
 const schedule = require('node-schedule');
-require('dotenv').config();
+const http = require('http');
 
 const PREMIUM_ROLE_ID = '1388288386242183208';
 const FREE_ROLE_ID = '1390752446724444180';
 const ADMIN_USER_ID = '1247253422961594409';
 
-// === Servidor Express para mantener el bot vivo en Render ===
+// === CONTROL DE HORARIO ===
+const ahora = new Date();
+const offsetParaguay = -3 * 60;
+const utcOffset = ahora.getTimezoneOffset();
+const ahoraParaguay = new Date(ahora.getTime() + (offsetParaguay - utcOffset) * 60000);
+const diaSemana = ahoraParaguay.getDay();
+const hora = ahoraParaguay.getHours();
+
+const horarioPermitido =
+  (diaSemana >= 1 && diaSemana <= 5 && hora >= 5 && hora < 23) ||  // Lunes a Viernes 05:00 - 23:00
+  ((diaSemana === 0 || diaSemana === 6) && hora >= 8 && hora < 23); // Sábados y Domingos 08:00 - 23:00
+
+if (!horarioPermitido) {
+  console.log("🛑 Psicobot apagado automáticamente por estar fuera del horario permitido (Render Free Plan)");
+  process.exit();
+}
+
+// === EXPRESS PARA MANTENER VIVO EN RENDER ===
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("Morpheus está en línea 🧠");
+  res.send("✅ Morpheus está despierto.");
 });
 
 app.listen(PORT, () => {
-  console.log(`🌐 Servidor Express corriendo en el puerto ${PORT}`);
+  console.log(`🌐 Servidor Express activo en puerto ${PORT}`);
 });
 
+// === DISCORD CLIENT ===
 let client;
 
 function startBot() {
@@ -45,15 +64,9 @@ function startBot() {
         await message.reply(
           "🔒 **El acceso a Morpheus está restringido.**\n\n" +
           "🕶️ *Eres parte de los observadores, aún no has cruzado la puerta.*\n\n" +
-          "💊 *Esta inteligencia ha sido diseñada para acompañar a los traders de élite —aquellos que eligieron la pastilla roja del compromiso, la disciplina y la mentalidad profesional.*\n\n" +
+          "💊 *Esta inteligencia ha sido diseñada para acompañar a los traders de élite.*\n\n" +
           "🌐 Como usuario **Free**, solo ves la superficie del sistema.\n" +
           "Para acceder al núcleo, necesitás convertirte en usuario **Premium**.\n\n" +
-          "🔓 Al hacerlo, desbloquearás a *Morpheus*:\n" +
-          "• Psicólogo de trading\n" +
-          "• Mentor emocional\n" +
-          "• Coach mental diario\n" +
-          "• Análisis personalizado\n" +
-          "• Disciplina automatizada\n\n" +
           "📈 *Es momento de subir de nivel. El mercado no espera.*\n\n" +
           "💬 *Contactá a un administrador y prepárate para salir de la Matrix superficial.*"
         );
@@ -114,31 +127,7 @@ async function checkUserAccess(userId) {
   }
 }
 
-function stopBot() {
-  if (client) {
-    console.log("🛑 Morpheus desconectado (23:59)");
-    client.destroy();
-    client = null;
-  }
-}
-
-// === SCHEDULE ===
-schedule.scheduleJob('0 5 * * *', () => {
-  console.log("⏰ Iniciando Morpheus");
-  startBot();
-});
-
-schedule.scheduleJob('59 23 * * *', () => {
-  console.log("⏰ Apagando Morpheus");
-  stopBot();
-});
-
-setInterval(() => {
-  if (client && client.ws.status === 0) {
-    console.log("💓 Morpheus sigue activo...");
-  }
-}, 1000 * 60 * 14);
-
+// === CHECK-IN EMOCIONAL AUTOMÁTICO ===
 schedule.scheduleJob('30 12 * * *', async () => {
   if (client) {
     const usuario = await client.users.fetch(ADMIN_USER_ID);
@@ -160,5 +149,11 @@ schedule.scheduleJob('30 12 * * *', async () => {
   }
 });
 
-// === ESTA LÍNEA INICIALIZA EL BOT INMEDIATAMENTE EN RENDER ===
-startBot(); // 👈 Esto es lo que hacía falta para que el bot aparezca online
+// === AUTOPING PARA MANTENER VIVO EN RENDER ===
+setInterval(() => {
+  require('https').get('https://psicobot.onrender.com');
+  console.log("🔁 Autoping enviado para mantener despierto a Morpheus.");
+}, 240000); // Cada 4 minutos
+
+// === INICIAR EL BOT ===
+startBot();
