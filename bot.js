@@ -1,54 +1,46 @@
+// === Morpheus (Psicobot) — Render-ready ===
 require('dotenv').config();
 const express = require('express');
-const fs = require('fs');
-const schedule = require('node-schedule');
+const https = require('https');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const schedule = require('node-schedule');
 const { obtenerRespuestaPsicologica } = require('./funciones/psicologo');
-const { obtenerNoticias } = require('./scraper');
 
-// === CONFIG ===
 const PREMIUM_ROLE_ID = '1388288386242183208';
 const FREE_ROLE_ID    = '1390752446724444180';
 const ADMIN_USER_ID   = '1247253422961594409';
-const CANAL_ALERTAS_ID= '1403015672794976366';
 
+// ===== Timezone & horario =====
 const TZ = 'America/Asuncion';
-
-// === UTIL: horario permitido (NO mata el proceso) ===
 function horarioPermitidoAhora() {
-  const ahora = new Date();
-  // Convertir a hora PY usando Intl (evita errores de offset)
-  const fmt = new Intl.DateTimeFormat('es-PY', { hour: '2-digit', weekday: 'short', hour12: false, timeZone: TZ });
-  const parts = fmt.formatToParts(ahora);
-  const hh = parseInt(parts.find(p => p.type === 'hour').value, 10);
-  const wk = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: TZ }).format(ahora); // Sun..Sat
-  const map = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
-  const d = map[wk];
+  const now = new Date();
+  const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: TZ }).format(now); // Sun..Sat
+  const hourStr = new Intl.DateTimeFormat('en-US', { hour: '2-digit', hour12: false, timeZone: TZ }).format(now);
+  const hour = parseInt(hourStr, 10);
+  const d = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[weekday];
 
-  const habil =
-    ((d >= 1 && d <= 5) && hh >= 5 && hh < 23) ||
-    ((d === 0 || d === 6) && hh >= 8 && hh < 23);
-
-  return habil;
+  // Lun–Vie 05:00–23:00 | Sáb–Dom 08:00–23:00
+  const laboral = (d >= 1 && d <= 5) && hour >= 5 && hour < 23;
+  const finde   = (d === 0 || d === 6) && hour >= 8 && hour < 23;
+  return laboral || finde;
 }
 
-// === EXPRESS KEEP-ALIVE ===
+// ===== Express keep-alive =====
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (_req, res) => res.status(200).send('✅ The Architect running'));
+app.get('/', (_req, res) => res.status(200).send('🧠 Morpheus está en línea'));
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
 app.listen(PORT, () => {
-  console.log(`🌐 Keep-alive server escuchando en ${PORT}`);
+  console.log(`🌐 Servidor Express corriendo en puerto ${PORT}`);
 });
 
-// === DISCORD CLIENT ===
+// ===== Discord client (una sola instancia) =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,   // por si luego escuchas en canales
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent
   ],
@@ -56,62 +48,95 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-  console.log(`✅ Bot iniciado como ${client.user.tag}`);
+  console.log(`🧠 Morpheus activo como ${client.user.tag}`);
   client.user.setPresence({
     status: 'online',
-    activities: [{ name: 'LIT + noticias en tiempo real', type: 3 }]
+    activities: [{ name: 'Psicología de trading + LIT', type: 3 }] // WATCHING
   });
 
-  programarEnvios();
-  programarRecordatorios();
+  // Schedules con TZ
+  programarCheckIn();
 });
 
-// — Logs de conexión para diagnosticar —
+// Logs útiles
 client.on('shardDisconnect', (e, id) => console.warn(`🧩 Shard ${id} disconnected:`, e?.code));
 client.on('shardError', (err, id) => console.error(`🧩 Shard ${id} error:`, err));
 client.on('error', err => console.error('Client error:', err));
-client.on('warn', m => console.warn('Warn:', m));
+client.on('warn',  m  => console.warn('Warn:', m));
 
-// === MENSAJERÍA ===
+// ===== Mensajería (DMs) =====
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  if (message.content === '!noticias') {
-    if (!horarioPermitidoAhora()) return message.reply('⏱️ Fuera del horario operativo.');
-    const noticias = await obtenerNoticias();
-    return message.channel.send(noticias);
+  // Solo DMs (ChannelType.DM === 1 en v14)
+  if (message.channel.type !== 1) return;
+
+  const access = await checkUserAccess(message.author.id);
+
+  if (access === 'free') {
+    await message.reply(
+      "🔒 **El acceso a Morpheus está restringido.**\n\n" +
+      "🕶️ *Eres parte de los observadores, aún no has cruzado la puerta.*\n\n" +
+      "💊 *Esta IA acompaña a traders que eligieron la pastilla roja: compromiso, disciplina y mentalidad profesional.*\n\n" +
+      "🌐 Como usuario **Free**, solo ves la superficie del sistema.\n" +
+      "Para acceder al núcleo, necesitás convertirte en **Premium**.\n\n" +
+      "🔓 Desbloqueás a *Morpheus*:\n" +
+      "• Psicólogo de trading\n" +
+      "• Mentor emocional\n" +
+      "• Coach mental diario\n" +
+      "• Análisis personalizado\n" +
+      "• Disciplina automatizada\n\n" +
+      "📈 *Es momento de subir de nivel. El mercado no espera.*\n" +
+      "💬 Contactá a un administrador."
+    );
+    return;
   }
 
-  // DM (type 1)
-  if (message.channel.type === 1) {
-    const access = await checkUserAccess(message.author.id);
-    if (access === 'free')  return message.reply('🔒 Acceso restringido. Contactá a un admin.');
-    if (access === 'denied')return message.reply('⚠️ Servicio exclusivo para Premium.');
+  if (access === 'denied') {
+    await message.reply(
+      "⚠️ Este servicio es **exclusivo para usuarios Premium**.\n" +
+      "Para obtener acceso, contactá a un administrador."
+    );
+    return;
+  }
 
-    const contenido = message.content.toLowerCase();
-    if (contenido.includes('comencemos el día') || contenido.includes('comencemos el dia')) {
-      return message.reply(
-        "💊 **BIENVENIDO, OPERADOR.**\n" +
-        "🧠 *Enfoque:* setups claros.\n" +
-        "🎯 *Meta:* disciplina.\n" +
-        "🧘 *Emoción:* calma anticipada.\n" +
-        "⏱️ *Horario operativo:* 05:00–23:00 (PY)."
-      );
-    }
+  // Si es Premium, respetar franja horaria
+  if (!horarioPermitidoAhora()) {
+    await message.reply('⏱️ *Fuera del horario operativo (PY). Vuelvo a estar activo en la próxima franja.*');
+    return;
+  }
 
-    try {
-      const respuesta = await obtenerRespuestaPsicologica(contenido);
-      await message.reply(respuesta);
-    } catch (e) {
-      console.error('❌ Error IA:', e.message);
-      await message.reply('⚠️ No pude procesar tu mensaje.');
-    }
+  // Flujos rápidos
+  const contenido = message.content.toLowerCase();
+
+  if (contenido.includes("comencemos el día") || contenido.includes("comencemos el dia")) {
+    await message.reply(
+      "💊 **BIENVENIDO DE NUEVO, OPERADOR.**\n\n" +
+      "🧠 ACTIVANDO PROTOCOLO DE MENTALIDAD PARA EL TRADER DE ALTO RENDIMIENTO...\n\n" +
+      "🔹 *Enfoque:* SOLO operar setups claros.\n" +
+      "🔹 *Meta de hoy:* Mantener la disciplina.\n" +
+      "🔹 *Emoción dominante:* 🧘 Calma anticipada.\n" +
+      "🔹 *Recordatorio:* El mercado no se controla, se interpreta.\n\n" +
+      "⏱️ *Horario operativo (PY):* Lun–Vie 05:00–23:00 | Sáb–Dom 08:00–23:00.\n" +
+      "💬 *Te hablaré al mediodía para hacer check-in.*\n\n" +
+      "☕ ¿Listo para ejecutar como un profesional?"
+    );
+    return;
+  }
+
+  try {
+    const respuesta = await obtenerRespuestaPsicologica(contenido);
+    await message.reply(respuesta);
+  } catch (error) {
+    console.error('❌ Error al generar respuesta:', error.message);
+    await message.reply('⚠️ No pude procesar tu mensaje. Revisá tu cuenta o conexión.');
   }
 });
 
+// ===== Login =====
 client.login(process.env.DISCORD_TOKEN);
 
-// === ROLES ===
+// ===== Roles =====
 async function checkUserAccess(userId) {
   try {
     for (const [, guild] of client.guilds.cache) {
@@ -122,114 +147,48 @@ async function checkUserAccess(userId) {
       }
     }
     return 'denied';
-  } catch (e) {
-    console.error('❌ Error verificando rol:', e.message);
+  } catch (error) {
+    console.error("❌ Error verificando rol del usuario:", error.message);
     return 'denied';
   }
 }
 
-// === SCHEDULERS (con TZ y sin matar proceso) ===
-function programarEnvios() {
-  // Dom 18:30 — semanal
-  schedule.scheduleJob({ tz: TZ, rule: '30 18 * * 0' }, () => enviarNoticias('semanales'));
-  // Lun–Vie 05:00 y 08:30 — diarias
-  schedule.scheduleJob({ tz: TZ, rule: '0 5 * * 1-5' },  () => enviarNoticias('diarias'));
-  schedule.scheduleJob({ tz: TZ, rule: '30 8 * * 1-5' }, () => enviarNoticias('diarias'));
-
-  // Reinicio “soft” 04:50 (no mata; solo reinicia schedules si hiciera falta)
-  schedule.scheduleJob({ tz: TZ, rule: '50 4 * * *' }, () => {
-    console.log('🔄 (soft) mantenimiento 04:50 — no se apaga el proceso');
-  });
-
-  // Autoping cada 4 min a tu PROPIO servicio
-  const target = (process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '') || 'https://the-architect-ru7k.onrender.com';
-  setInterval(async () => {
+// ===== Check-in emocional 12:30 (PY) =====
+function programarCheckIn() {
+  schedule.scheduleJob({ tz: TZ, rule: '30 12 * * *' }, async () => {
     try {
-      await fetch(`${target}/health`);
-      console.log(`🔁 Autoping OK -> ${target}/health`);
-    } catch (e) {
-      console.error('⚠️ Autoping error:', e.message);
+      const usuario = await client.users.fetch(ADMIN_USER_ID);
+      await usuario.send(
+        "☀️ **Check-in emocional 🧠**\n\n" +
+        "Ya es mediodía. ¿Cómo va tu operativa hasta ahora?\n\n" +
+        "🔹 ¿Operaste según tu plan?\n" +
+        "🔹 ¿Te sentís emocionalmente en control?\n" +
+        "🔹 ¿Necesitás pausar y respirar?\n\n" +
+        "💬 *Respondeme si querés que hablemos un rato. Estoy para ayudarte.*"
+      );
+      console.log("📩 Check-in enviado a Fernando a las 12:30 (PY)");
+    } catch (error) {
+      console.error("❌ No se pudo enviar el DM del check-in:", error.message);
     }
-  }, 240000);
+  });
 }
 
-async function enviarNoticias(tipo) {
-  try {
-    if (!horarioPermitidoAhora()) {
-      console.log(`⏱️ ${tipo}: fuera de horario, no envío.`);
-      return;
-    }
-    const noticias = await obtenerNoticias();
+// ===== Autoping (mantener despierto el servicio) =====
+const base = (process.env.RENDER_EXTERNAL_URL || process.env.AUTOPING_URL || '').replace(/\/$/, '');
+const autopingTarget = base ? `${base}/health` : null;
 
-    const canal = await client.channels.fetch(CANAL_ALERTAS_ID).catch(() => null);
-    if (canal) await canal.send(noticias);
-
-    const usuariosPremium = fs.existsSync('PREMIUM.txt')
-      ? fs.readFileSync('PREMIUM.txt', 'utf-8').split('\n').filter(Boolean)
-      : [];
-    for (const id of usuariosPremium) {
-      try {
-        const user = await client.users.fetch(id.trim());
-        await user.send(noticias);
-      } catch (e) {
-        console.error(`❌ DM a ${id}:`, e.message);
-      }
-    }
-    console.log(`📤 Noticias ${tipo} enviadas.`);
-  } catch (err) {
-    console.error('❌ Error al enviar noticias:', err.message);
-  }
+if (autopingTarget) {
+  setInterval(() => {
+    https.get(autopingTarget, res => {
+      if (res.statusCode === 200) console.log(`🔁 Autoping OK -> ${autopingTarget}`);
+      else console.warn(`⚠️ Autoping status ${res.statusCode} -> ${autopingTarget}`);
+    }).on('error', err => console.error('⚠️ Autoping error:', err.message));
+  }, 240000); // cada 4 minutos
+} else {
+  console.log('ℹ️ AUTOPING desactivado (define RENDER_EXTERNAL_URL o AUTOPING_URL para habilitarlo).');
 }
 
-async function programarRecordatorios() {
-  try {
-    const noticias = await obtenerNoticias();
-    const lineas = noticias.split('\n');
-
-    for (const linea of lineas) {
-      const match = linea.match(/• (.*?) - \*\*(.*?)\*\* \((\d{1,2}):(\d{2})\)/);
-      if (!match) continue;
-
-      const [, flag, evento, hh, mm] = match;
-      // Fecha PY
-      const ahora = new Date();
-      const fechaPY = new Date(new Intl.DateTimeFormat('en-US', {
-        timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hour12: false
-      }).format(ahora).replace(',', ''));
-      fechaPY.setHours(parseInt(hh) , parseInt(mm) - 10, 0, 0);
-
-      // Convertir a UTC date equivalente
-      const when = new Date(fechaPY.toLocaleString('en-US', { timeZone: 'UTC' }));
-
-      if (when <= new Date()) continue;
-
-      schedule.scheduleJob({ tz: 'UTC', start: when, rule: `${when.getUTCMinutes()} ${when.getUTCHours()} ${when.getUTCDate()} ${when.getUTCMonth()+1} *` }, async () => {
-        if (!horarioPermitidoAhora()) return;
-
-        const mensaje = `🚨 **Recordatorio: Noticia de Alto Impacto**\n${flag} - **${evento}** en 10 minutos.`;
-        try {
-          const canal = await client.channels.fetch(CANAL_ALERTAS_ID);
-          if (canal) await canal.send(mensaje);
-        } catch (e) {
-          console.error('❌ Error canal alertas:', e.message);
-        }
-
-        const usuarios = fs.existsSync('PREMIUM.txt')
-          ? fs.readFileSync('PREMIUM.txt','utf-8').split('\n').filter(Boolean)
-          : [];
-        for (const id of usuarios) {
-          try {
-            const user = await client.users.fetch(id.trim());
-            await user.send(mensaje);
-          } catch (e) {
-            console.error(`❌ Recordatorio a ${id}:`, e.message);
-          }
-        }
-        console.log(`⏰ Recordatorio enviado: ${evento} (${hh}:${mm})`);
-      });
-    }
-  } catch (e) {
-    console.error('❌ Error programando recordatorios:', e.message);
-  }
-}
+// ===== Heartbeat de conexión Discord (opcional) =====
+setInterval(() => {
+  if (client?.ws?.status === 0) console.log('💓 Morpheus sigue activo...');
+}, 1000 * 60 * 14);
